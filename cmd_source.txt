@@ -1,0 +1,1 @@
+source ~/envs/face_recog/bin/activate
