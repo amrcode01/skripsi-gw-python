@@ -23,7 +23,7 @@ collection.load()
 def encode_face(img) -> np.ndarray:
     try:
         # DeepFace return banyak hasil, kita ambil satu
-        embedding_obj = DeepFace.represent(img_path=img, model_name='Facenet512', enforce_detection=True)[0]
+        embedding_obj = DeepFace.represent(img_path=img, model_name='Facenet', enforce_detection=True)[0]
         embedding = np.array(embedding_obj["embedding"], dtype=np.float32)
         norm_embedding = normalize([embedding])[0]  # Normalisasi
         return norm_embedding
@@ -34,69 +34,61 @@ def encode_face(img) -> np.ndarray:
 # =====================================
 # 2. Buat Dataset dari Webcam dan Kirim ke Milvus
 # =====================================
-def create_dataset_from_livecam(nim: str, nama: str):
-    cam = cv2.VideoCapture(0)
-    print("Tekan 's' untuk simpan wajah. Tekan 'q' untuk keluar.")
-    
-    while True:
-        ret, frame = cam.read()
-        if not ret:
-            break
+def augment_image(image):
+    augmented_images = []
 
-        cv2.imshow("Ambil Wajah", frame)
-        key = cv2.waitKey(1) & 0xFF
+    # Flip horizontal
+    flip = cv2.flip(image, 1)
+    augmented_images.append(('flip', flip))
 
-        if key == ord('s'):
-            embedding = encode_face(frame)
-            if embedding is not None:
-                collection.insert([[nim], [nama], [embedding],["original"]])
-                print(f"Wajah {nama} disimpan ke Milvus.")
-                break
-            else:
-                print("Gagal mendeteksi wajah.")
-        elif key == ord('q'):
-            break
+    # Brightness adjustment
+    bright = cv2.convertScaleAbs(image, alpha=1.2, beta=30)
+    augmented_images.append(('bright', bright))
 
-    cam.release()
-    cv2.destroyAllWindows()
+    # Rotate 15 degrees
+    h, w = image.shape[:2]
+    M = cv2.getRotationMatrix2D((w//2, h//2), 15, 1)
+    rotated = cv2.warpAffine(image, M, (w, h))
+    augmented_images.append(('rotate', rotated))
 
-# =====================================
-# 3. Pencarian Wajah dari Webcam (Live)
-# =====================================
-def search_face_from_livecam(threshold=0.7):
-    cam = cv2.VideoCapture(0)
-    print("Tekan 'q' untuk keluar pencarian.")
-    
-    while True:
-        ret, frame = cam.read()
-        if not ret:
-            break
+    # Gaussian blur (optional)
+    blur = cv2.GaussianBlur(image, (5, 5), 0)
+    augmented_images.append(('blur', blur))
 
-        embedding = encode_face(frame)
-        if embedding is not None:
-            search_result = collection.search(
-                data=[embedding],
-                anns_field="encoding",
-                param={"metric_type": "COSINE", "params": {"nprobe": 10}},
-                limit=1,
-                output_fields=["nim", "nama"]
-            )
+    return augmented_images
 
-            for hits in search_result:
-                for hit in hits:
-                    distance = hit.distance
-                    if distance >= threshold:
-                        print(f"{distance} >= {threshold}")
-                        print(f"[MATCH] Nama: {hit.entity.get('nama')} | NIM: {hit.entity.get('nim')} | Score: {distance:.4f}")
-                    else:
-                        print(f"[NO MATCH] Score: {distance:.4f}")
+def create_dataset_from_image(image, nim: str, nama: str):
+    try:
+        success = False
+        pesan_list = []
 
-        cv2.imshow("Search Face", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        # Cek apakah gambar valid
+        if image is None:
+            return json.dumps({"status": False, "pesan": "[ERROR] Gambar kosong atau tidak valid."})
 
-    cam.release()
-    cv2.destroyAllWindows()
+        # List untuk menyimpan semua variasi gambar (original + augmentasi)
+        all_images = [('original', image)] + augment_image(image)
+
+        for aug_type, img in all_images:
+            try:
+                embedding = encode_face(img)
+                if embedding is not None:
+                    collection.insert([[nim], [nama], [embedding], [aug_type]])
+                    pesan_list.append(f"Wajah {nama} ({aug_type}) berhasil disimpan.")
+                    success = True
+                else:
+                    pesan_list.append(f"[WARNING] Wajah tidak terdeteksi pada augmentasi '{aug_type}'.")
+            except Exception as e:
+                pesan_list.append(f"[ERROR] Gagal memproses augmentasi '{aug_type}': {str(e)}")
+
+        if not success:
+            return json.dumps({"status": False, "pesan": "[ERROR] Tidak ada wajah yang terdeteksi dalam semua gambar."})
+
+        return json.dumps({"status": True, "pesan": pesan_list})
+
+    except Exception as e:
+        return json.dumps({"status": False, "pesan": f"[EXCEPTION] Terjadi kesalahan: {str(e)}"})
+
 def search_face_from_face(filepath: str, threshold=0.7):
     embedding = encode_face(filepath)
     

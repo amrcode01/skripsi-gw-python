@@ -1,9 +1,11 @@
 import cv2
-from amr_helper.face_recog import search_face_from_face,curl_post
+from amr_helper.face_recog import search_face_from_face,curl_post,create_dataset_from_image
 import time
 import json
 import base64
 from ultralytics import YOLO
+from flask import Flask, request, jsonify, send_from_directory
+import threading
 
 model = YOLO('yolov11n-face.pt')
 cap = cv2.VideoCapture(0)
@@ -12,15 +14,60 @@ prev_count = 0
 stable_count = 0
 countdown_start = None
 countdown_duration = 3  # detik
-paused = False
+paused = True
+last_paused_state = paused  # untuk mendeteksi perubahan state
+
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return jsonify({"message": "YOLO Flask API Ready!"})
+
+@app.route('/add_gambar')
+def upload_base64():
+    try:
+        data = request.get_json()
+        nama = data.get("nama")
+        nim = data.get("nomor_identitas")
+        base64_str = data.get("image")
+        if not base64_str:
+            return jsonify({"status" : False,"pesan": "Gambar tidak ditemukan"})
+        elif not nama:
+            return jsonify({"status" : False,"pesan": "Nama tidak boleh kosong"})
+        elif not nim:
+            return jsonify({"status" : False,"pesan": "Nomor identitas tidak boleh kosong"})
+        else: 
+            img = base64_to_ndarray(base64_str)
+            create_result = create_dataset_from_image(img,nim,nama)
+            create_result = json.loads(create_result)
+            if create_result.get("status") == True:
+                return jsonify({"status": True, pesan:"Dataset Berhasil dibuat"})
+            else:
+                return jsonify({"status": False, pesan:"Dataset Gagal dibuat"})
+    except Exception as e:
+        return jsonify({"status": False, pesan:"Error Exception"})
+
+
+def run_flask():
+    app.run(host="0.0.0.0", port=5000)
+
+# Jalankan Flask di thread terpisah
+threading.Thread(target=run_flask, daemon=True).start()
 
 while True:
-    if not paused:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    if paused != last_paused_state:
+        # Jika state berubah, tutup semua jendela sebelumnya
+        cv2.destroyAllWindows()
+        last_paused_state = paused
 
-        frame = cv2.flip(frame, 1)
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    frame = cv2.flip(frame, 1)
+
+    if not paused:
+        
         results = model.predict(source=frame, conf=0.4, verbose=False)
         boxes = results[0].boxes
         class_ids = boxes.cls.cpu().numpy().astype(int)
@@ -78,7 +125,14 @@ while True:
         cv2.imshow("YOLO Wajah + Countdown", annotated_frame)
 
     else:
-        cv2.imshow("YOLO Wajah + Countdown", annotated_frame)
+        cv2.putText(frame, f"Yolo Proses Dipause",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                    (0, 255, 0), 2)
+        cv2.putText(frame, f"untuk melanjutkan pencet p",
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                    (0, 255, 0), 2)
+
+        cv2.imshow("Yolo STOP",frame)
 
     key = cv2.waitKey(1) & 0xFF
     if key == 27:  # ESC
