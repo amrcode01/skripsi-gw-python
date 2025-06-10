@@ -1,5 +1,5 @@
 import cv2
-from amr_helper.face_recog import search_face_from_face,curl_post,create_dataset_from_image,base64_to_ndarray,is_yolo_face_valid,show_toast
+from amr_helper.face_recog import search_face_from_face,curl_post,create_dataset_from_image,base64_to_ndarray,is_yolo_face_valid,show_toast,delete_by_nim
 import time
 import json
 import base64
@@ -24,6 +24,19 @@ app = Flask(__name__)
 def index():
     return jsonify({"message": "YOLO Flask API Ready!"})
 
+@app.route('/delete_data', methods=['POST'])
+def delete_data():
+    try:
+        data = request.get_json()
+        nim = data.get("nim")
+        post_delete = delete_by_nim(nim)
+        if not nim:
+            return jsonify({"status" : False,"pesan": "Nim tidak ditemukan"})
+        else:
+            return post_delete
+    except Exception as e:
+        print(e)
+        return jsonify({"status": False, "pesan":"Error Exception"})
 @app.route('/add_data', methods=['POST'])
 def upload_base64():
     try:

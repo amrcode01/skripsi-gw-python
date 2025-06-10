@@ -117,6 +117,26 @@ def search_face_from_face(filepath: str, threshold=0.75):
             else:
                 return json.dumps({"status": False,"pesan": f"[NO MATCH] Score: {distance:.4f}"})
     return json.dumps({"status": False,"pesan": "[ERROR] Wajah tidak ditemukan."})
+def delete_by_nim(nim_value: str):
+    try:
+        expression = f"nim == '{nim_value}'"
+        result = collection.delete(expr=expression)
+        if result.delete_count > 0:
+            return {
+                "status": True,
+                "pesan": f"Berhasil menghapus data dengan NIM {nim_value}"
+            }
+        else:
+            return {
+                "status": True,
+                "pesan": f"Tidak ada data dengan NIM {nim_value} yang ditemukan"
+            }
+        
+    except Exception as e:
+        return {
+            "status": False,
+            "pesan": f"Error saat menghapus data: {str(e)}"
+        }
 def curl_post(data: dict):
     try:
         headers = {"Content-Type": "application/json"}
