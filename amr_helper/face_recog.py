@@ -5,8 +5,10 @@ from pymilvus import connections, FieldSchema, CollectionSchema, DataType, Colle
 from sklearn.preprocessing import normalize
 import time
 import json
+import base64
 import requests
-
+import platform
+import sys
 
 URL_API = "http://localhost:3333/api/python"
 # Hubungkan ke Milvus
@@ -67,7 +69,7 @@ def create_dataset_from_image(image, nim: str, nama: str):
             return json.dumps({"status": False, "pesan": "[ERROR] Gambar kosong atau tidak valid."})
 
         # List untuk menyimpan semua variasi gambar (original + augmentasi)
-        all_images = [('original', image)] + augment_image(image)
+        all_images = [('original', image)]# + augment_image(image) // buat tanpa augmentasi dulu
 
         for aug_type, img in all_images:
             try:
@@ -89,7 +91,7 @@ def create_dataset_from_image(image, nim: str, nama: str):
     except Exception as e:
         return json.dumps({"status": False, "pesan": f"[EXCEPTION] Terjadi kesalahan: {str(e)}"})
 
-def search_face_from_face(filepath: str, threshold=0.7):
+def search_face_from_face(filepath: str, threshold=0.75):
     embedding = encode_face(filepath)
     
     if embedding is None:
@@ -110,8 +112,8 @@ def search_face_from_face(filepath: str, threshold=0.7):
                 return json.dumps({"status": True,"pesan": f" {hit.entity.get('nama')} Score: {distance:.4f}", "data" : {
                     "nama" : hit.entity.get('nama'),
                     "nim" : hit.entity.get('nim'),
+                    "score" : hit.entity.get('distance'),
                 }})
-                print()
             else:
                 return json.dumps({"status": False,"pesan": f"[NO MATCH] Score: {distance:.4f}"})
     return json.dumps({"status": False,"pesan": "[ERROR] Wajah tidak ditemukan."})
@@ -125,6 +127,59 @@ def curl_post(data: dict):
     except requests.exceptions.RequestException as e:
         print(f"[ERROR] Gagal POST ke {URL_API}: {e}")
         return []
+def is_yolo_face_valid(x1, y1, x2, y2, frame_width, frame_height,
+                       min_ratio=0.2, max_ratio=0.6):
+    # Konversi ke w dan h
+    w = x2 - x1
+    h = y2 - y1
+
+    # Cek apakah bounding box di dalam frame
+    if x1 < 0 or y1 < 0 or x2 > frame_width or y2 > frame_height:
+        return False
+
+    # Cek apakah ukurannya sesuai proporsi
+    face_area = w * h
+    frame_area = frame_width * frame_height
+    ratio = face_area / frame_area
+
+    return min_ratio <= ratio <= max_ratio
+def base64_to_ndarray(base64_str):
+    # Jika base64 ada prefix "data:image/jpeg;base64,...", hapus itu dulu
+    if "," in base64_str:
+        base64_str = base64_str.split(",")[1]
+    
+    # Decode base64 ke bytes
+    img_bytes = base64.b64decode(base64_str)
+
+    # Convert bytes ke numpy array
+    img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+
+    # Decode menjadi gambar (BGR image)
+    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    return img
+def show_toast(text: str, duration: int = 5):
+    system = platform.system()
+
+    if system == "Windows":
+        try:
+            from win10toast import ToastNotifier
+            toaster = ToastNotifier()
+            toaster.show_toast("Notifikasi", text, duration=duration)
+        except ImportError:
+            print("win10toast belum terinstall. Install dengan: pip install win10toast")
+
+    elif system == "Linux":
+        try:
+            import notify2
+            notify2.init("Python App")
+            n = notify2.Notification("Notifikasi", text)
+            n.set_timeout(duration * 1000)  # duration dalam milidetik
+            n.show()
+        except ImportError:
+            print("notify2 belum terinstall. Install dengan: pip install notify2")
+
+    else:
+        print(f"Toast belum didukung di OS ini: {system}")
 #create_dataset_from_livecam("2155201014","Amir")
 #search_face_from_livecam()
 #search_face_from_file("gabung.jpg")

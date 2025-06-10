@@ -1,11 +1,12 @@
 import cv2
-from amr_helper.face_recog import search_face_from_face,curl_post,create_dataset_from_image
+from amr_helper.face_recog import search_face_from_face,curl_post,create_dataset_from_image,base64_to_ndarray,is_yolo_face_valid,show_toast
 import time
 import json
 import base64
 from ultralytics import YOLO
 from flask import Flask, request, jsonify, send_from_directory
 import threading
+import numpy as np
 
 model = YOLO('yolov11n-face.pt')
 cap = cv2.VideoCapture(0)
@@ -23,7 +24,7 @@ app = Flask(__name__)
 def index():
     return jsonify({"message": "YOLO Flask API Ready!"})
 
-@app.route('/add_gambar')
+@app.route('/add_data', methods=['POST'])
 def upload_base64():
     try:
         data = request.get_json()
@@ -41,11 +42,12 @@ def upload_base64():
             create_result = create_dataset_from_image(img,nim,nama)
             create_result = json.loads(create_result)
             if create_result.get("status") == True:
-                return jsonify({"status": True, pesan:"Dataset Berhasil dibuat"})
+                return jsonify({"status": True, "pesan":"Dataset Berhasil dibuat"})
             else:
-                return jsonify({"status": False, pesan:"Dataset Gagal dibuat"})
+                return jsonify({"status": False, "pesan":"Dataset Gagal dibuat"})
     except Exception as e:
-        return jsonify({"status": False, pesan:"Error Exception"})
+        print(e)
+        return jsonify({"status": False, "pesan":"Error Exception"})
 
 
 def run_flask():
@@ -60,14 +62,14 @@ while True:
         cv2.destroyAllWindows()
         last_paused_state = paused
 
-    ret, frame = cap.read()
-    if not ret:
-        break
-
-    frame = cv2.flip(frame, 1)
-
     if not paused:
-        
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame = cv2.flip(frame, 1)
+        h, w = frame.shape[:2]
+
         results = model.predict(source=frame, conf=0.4, verbose=False)
         boxes = results[0].boxes
         class_ids = boxes.cls.cpu().numpy().astype(int)
@@ -93,22 +95,42 @@ while True:
                 for box in boxes:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     face_img = frame[y1:y2, x1:x2]
-
+                    
+                    cek_valid_face = is_yolo_face_valid(x1, y1, x2, y2, w, h)
+                    print(f"Valid Face {cek_valid_face}")
                     search_result = search_face_from_face(face_img)
                     search_result = json.loads(search_result)
+
+                    _, buffer = cv2.imencode('.jpg', face_img)
+                    img_base64 = base64.b64encode(buffer).decode('utf-8')
+
                     if(search_result.get("status")):                        
                         #is_live = liveness_model.predict(face_img) nanti tambahkan deteksi muka orang atau gambar
                         #label = "LIVE" if is_live > 0.8 else "PHOTO"
-                        print("Ditemukan ",search_result.get("data").get("nama"))
-                        cv2.imshow(search_result.get("data").get("nama"), face_img)
+                        print(f"Ditemukan {search_result.get("data").get("nama")} dengan score {search_result.get("data").get("score")}")
+                        
+                        data_hadir = {
+                            "nim" : search_result.get("data").get("nim"),
+                            "score" : search_result.get("data").get("score"),
+                            "img_code" : img_base64,
+                            "is_user" : True
+                        }
+                        try:
+                            post_hadir = curl_post(data_hadir)
+                            show_toast(post_hadir.get("pesan"))
+                        except Exception as e:
+                            print(e)
+                            show_toast("Gagal Post Kehadiran")
+
+                        
                     else:
-                        _, buffer = cv2.imencode('.jpg', face_img)
-                        img_base64 = base64.b64encode(buffer).decode('utf-8')
                         data_register = {
                             "img_code" : img_base64,
                             "is_user" : False
                         }
                         post_register = curl_post(data_register)
+                        print(f"Post register {post_register}")
+                        
             else:
                 cv2.putText(frame, f"Stabil dalam {int(remaining)+1}s",
                             (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1,
@@ -125,14 +147,15 @@ while True:
         cv2.imshow("YOLO Wajah + Countdown", annotated_frame)
 
     else:
-        cv2.putText(frame, f"Yolo Proses Dipause",
+        blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(blank_frame, f"Yolo Proses Dipause",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
                     (0, 255, 0), 2)
-        cv2.putText(frame, f"untuk melanjutkan pencet p",
+        cv2.putText(blank_frame, f"untuk melanjutkan pencet p",
                     (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1,
                     (0, 255, 0), 2)
 
-        cv2.imshow("Yolo STOP",frame)
+        cv2.imshow("Yolo STOP",blank_frame)
 
     key = cv2.waitKey(1) & 0xFF
     if key == 27:  # ESC
