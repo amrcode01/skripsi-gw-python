@@ -12,7 +12,7 @@ import sys
 
 URL_API = "http://localhost:3333/api/python"
 # Hubungkan ke Milvus
-connections.connect("default", host="localhost", port="19530")
+connections.connect("default", host="45.139.226.101", port="19530")
 # Konstanta
 COLLECTION_NAME = "faces"
 
@@ -58,6 +58,17 @@ def augment_image(image):
     augmented_images.append(('blur', blur))
 
     return augmented_images
+def cek_data_with_nim(nim):
+    results = collection.query(
+        expr=f"nim == '{nim}'",
+        output_fields=["nim", "nama"]
+    )
+
+    if results:
+        data = results[0]
+        return json.dumps({"status": True, "pesan": f"Data telah terdaftar sebagai {data.get("nama")}","data": results[0]})
+    else:
+        return json.dumps({"status": False, "pesan": "Data tidak ditemukan"})
 
 def create_dataset_from_image(image, nim: str, nama: str):
     try:

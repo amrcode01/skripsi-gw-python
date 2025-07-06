@@ -1,5 +1,6 @@
 import cv2
-from amr_helper.face_recog import search_face_from_face,curl_post,create_dataset_from_image,base64_to_ndarray,is_yolo_face_valid,show_toast,delete_by_nim
+from amr_helper.face_recog import cek_data_with_nim,search_face_from_face,curl_post,create_dataset_from_image,base64_to_ndarray,is_yolo_face_valid,show_toast,delete_by_nim
+from amr_helper.create_livecam import run_registration_session
 import time
 import json
 import base64
@@ -7,6 +8,9 @@ from ultralytics import YOLO
 from flask import Flask, request, jsonify, send_from_directory
 import threading
 import numpy as np
+
+import matplotlib.pyplot as plt
+
 
 model = YOLO('yolov11n-face.pt')
 cap = cv2.VideoCapture(0)
@@ -24,6 +28,15 @@ app = Flask(__name__)
 def index():
     return jsonify({"message": "YOLO Flask API Ready!"})
 
+@app.route('/create_from_livecam', methods=['POST'])
+def create_from_livecam():
+    global mode
+    try:
+        run_registration_session()
+        return jsonify({"status": True, "pesan": "Registrasi selesai"})  # <== Tambahkan ini
+    except Exception as e:
+        print(e)
+        return jsonify({"status": False, "pesan": "Error Exception"})
 @app.route('/delete_data', methods=['POST'])
 def delete_data():
     try:
@@ -34,6 +47,44 @@ def delete_data():
             return jsonify({"status" : False,"pesan": "Nim tidak ditemukan"})
         else:
             return post_delete
+    except Exception as e:
+        print(e)
+        return jsonify({"status": False, "pesan":"Error Exception"})
+@app.route('/validate_image', methods=['POST'])
+def validate_image():
+    try:
+        data = request.get_json()
+        nama = data.get("nama")
+        nim = data.get("nomor_identitas")
+        base64_str = data.get("image")
+
+        if not base64_str:
+            return jsonify({"status" : False,"pesan": "Gambar tidak ditemukan"})
+        elif not nama:
+            return jsonify({"status" : False,"pesan": "Nama tidak boleh kosong"})
+        elif not nim:
+            return jsonify({"status" : False,"pesan": "Nomor identitas tidak boleh kosong"})
+        else:
+            img = base64_to_ndarray(base64_str)
+            predict = model.predict(source=img)
+            boxes = predict[0].boxes
+            if boxes and len(boxes.xyxy) > 0:
+                box = boxes[0]
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                face_img = img[y1:y2, x1:x2]
+                resized_face = cv2.resize(face_img, (224, 224))
+
+                plt.imshow(cv2.cvtColor(resized_face, cv2.COLOR_BGR2RGB))
+                plt.axis('off')
+                plt.title("Crop Wajah")
+                plt.show()
+
+                
+                _, buffer = cv2.imencode('.jpg', resized_face)
+                img_base64 = base64.b64encode(buffer).decode('utf-8')
+                return jsonify({"status": True, "pesan":"Gambar terdeteksi dan valid","data" : img_base64})
+            else:
+                return jsonify({"status": False, "pesan":"Gambar tidak terdeteksi"})
     except Exception as e:
         print(e)
         return jsonify({"status": False, "pesan":"Error Exception"})
@@ -51,13 +102,17 @@ def upload_base64():
         elif not nim:
             return jsonify({"status" : False,"pesan": "Nomor identitas tidak boleh kosong"})
         else: 
-            img = base64_to_ndarray(base64_str)
-            create_result = create_dataset_from_image(img,nim,nama)
-            create_result = json.loads(create_result)
-            if create_result.get("status") == True:
-                return jsonify({"status": True, "pesan":"Dataset Berhasil dibuat"})
+            cek = json.loads(cek_data_with_nim(nim))
+            if cek.get("status") == True:
+                return jsonify({"status": True, "pesan":cek.get("pesan")})
             else:
-                return jsonify({"status": False, "pesan":"Dataset Gagal dibuat"})
+                img = base64_to_ndarray(base64_str)
+                create_result = create_dataset_from_image(img,nim,nama)
+                create_result = json.loads(create_result)
+                if create_result.get("status") == True:
+                    return jsonify({"status": True, "pesan":"Dataset Berhasil dibuat"})
+                else:
+                    return jsonify({"status": False, "pesan":"Dataset Gagal dibuat"})
     except Exception as e:
         print(e)
         return jsonify({"status": False, "pesan":"Error Exception"})
@@ -70,6 +125,7 @@ def run_flask():
 threading.Thread(target=run_flask, daemon=True).start()
 
 while True:
+    
     if paused != last_paused_state:
         # Jika state berubah, tutup semua jendela sebelumnya
         cv2.destroyAllWindows()
