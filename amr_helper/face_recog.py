@@ -40,22 +40,18 @@ def augment_image(image):
     augmented_images = []
 
     # Flip horizontal
-    flip = cv2.flip(image, 1)
-    augmented_images.append(('flip', flip))
+    augmented_images.append(('flip', cv2.flip(image, 1)))
 
-    # Brightness adjustment
-    bright = cv2.convertScaleAbs(image, alpha=1.2, beta=30)
-    augmented_images.append(('bright', bright))
+    # Brightness adjustment (+/- 20%)
+    augmented_images.append(('bright_up', cv2.convertScaleAbs(image, alpha=1.1, beta=20)))
+    augmented_images.append(('bright_down', cv2.convertScaleAbs(image, alpha=0.9, beta=-20)))
 
-    # Rotate 15 degrees
+    # Small rotation
     h, w = image.shape[:2]
-    M = cv2.getRotationMatrix2D((w//2, h//2), 15, 1)
-    rotated = cv2.warpAffine(image, M, (w, h))
-    augmented_images.append(('rotate', rotated))
-
-    # Gaussian blur (optional)
-    blur = cv2.GaussianBlur(image, (5, 5), 0)
-    augmented_images.append(('blur', blur))
+    for angle in [-10, 10]:  # Rotasi kiri-kanan 10 derajat
+        M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1)
+        rotated = cv2.warpAffine(image, M, (w, h))
+        augmented_images.append((f'rotate_{angle}', rotated))
 
     return augmented_images
 def cek_data_with_nim(nim):
@@ -80,7 +76,7 @@ def create_dataset_from_image(image, nim: str, nama: str):
             return json.dumps({"status": False, "pesan": "[ERROR] Gambar kosong atau tidak valid."})
 
         # List untuk menyimpan semua variasi gambar (original + augmentasi)
-        all_images = [('original', image)]# + augment_image(image) // buat tanpa augmentasi dulu
+        all_images = [('original', image)] + augment_image(image) #// buat tanpa augmentasi dulu
 
         for aug_type, img in all_images:
             try:
@@ -103,10 +99,16 @@ def create_dataset_from_image(image, nim: str, nama: str):
         return json.dumps({"status": False, "pesan": f"[EXCEPTION] Terjadi kesalahan: {str(e)}"})
 
 def search_face_from_face(filepath: str, threshold=0.75):
+    start_time = time.time()  # Mulai hitung waktu
+
     embedding = encode_face(filepath)
     
     if embedding is None:
-        return json.dumps({"status": False,"pesan": "[ERROR] Wajah tidak terdeteksi dalam gambar."})
+        return json.dumps({
+            "status": False,
+            "pesan": "[ERROR] Wajah tidak terdeteksi dalam gambar.",
+            "waktu_proses": f"{(time.time() - start_time):.4f} detik"
+        })
 
     search_result = collection.search(
         data=[embedding],
@@ -119,15 +121,29 @@ def search_face_from_face(filepath: str, threshold=0.75):
     for hits in search_result:
         for hit in hits:
             distance = hit.distance
+            process_time = time.time() - start_time
             if distance >= threshold:
-                return json.dumps({"status": True,"pesan": f" {hit.entity.get('nama')} Score: {distance:.4f}", "data" : {
-                    "nama" : hit.entity.get('nama'),
-                    "nim" : hit.entity.get('nim'),
-                    "score" : hit.entity.get('distance'),
-                }})
+                return json.dumps({
+                    "status": True,
+                    "pesan": f"{hit.entity.get('nama')} Score: {distance:.4f}",
+                    "data": {
+                        "nama": hit.entity.get('nama'),
+                        "nim": hit.entity.get('nim'),
+                        "score": hit.distance,
+                    },
+                    "waktu_proses": f"{process_time:.4f} detik"
+                })
             else:
-                return json.dumps({"status": False,"pesan": f"[NO MATCH] Score: {distance:.4f}"})
-    return json.dumps({"status": False,"pesan": "[ERROR] Wajah tidak ditemukan."})
+                return json.dumps({
+                    "status": False,
+                    "pesan": f"[NO MATCH] Score: {distance:.4f}",
+                    "waktu_proses": f"{process_time:.4f} detik"
+                })
+    return json.dumps({
+        "status": False,
+        "pesan": "[ERROR] Wajah tidak ditemukan.",
+        "waktu_proses": f"{(time.time() - start_time):.4f} detik"
+    })
 def delete_by_nim(nim_value: str):
     try:
         expression = f"nim == '{nim_value}'"

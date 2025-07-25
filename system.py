@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 model = YOLO('yolov11n-face.pt')
 cap = cv2.VideoCapture(0)
 
+run_yolo_realtime = True
 prev_count = 0
 stable_count = 0
 countdown_start = None
@@ -72,12 +73,13 @@ def validate_image():
                 box = boxes[0]
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 face_img = img[y1:y2, x1:x2]
-                resized_face = cv2.resize(face_img, (224, 224))
+                resized_face = cv2.resize(face_img, (224, 224), interpolation=cv2.INTER_LINEAR)
 
-                plt.imshow(cv2.cvtColor(resized_face, cv2.COLOR_BGR2RGB))
-                plt.axis('off')
-                plt.title("Crop Wajah")
-                plt.show()
+                #FOR DEBUG GAMBAR
+                #plt.imshow(cv2.cvtColor(resized_face, cv2.COLOR_BGR2RGB))
+                #plt.axis('off')
+                #plt.title("Crop Wajah")
+                #plt.show()
 
                 
                 _, buffer = cv2.imencode('.jpg', resized_face)
@@ -116,16 +118,54 @@ def upload_base64():
     except Exception as e:
         print(e)
         return jsonify({"status": False, "pesan":"Error Exception"})
+@app.route('/search_data', methods=['POST'])
+def search_data():
+    try:
+        data = request.get_json()
+        nim = data.get("nomor_identitas")
+        base64_str = data.get("image")
+        if not nim:
+            return jsonify({"status": False, "pesan": "Nomor identitas tidak boleh kosong"})
+        else:
+            img = base64_to_ndarray(base64_str)
+            predict = model.predict(source=img)
+            boxes = predict[0].boxes
+            if boxes and len(boxes.xyxy) > 0:
+                box = boxes[0]
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                face_img = img[y1:y2, x1:x2]
+                resized_face = cv2.resize(face_img, (224, 224))
 
-
+                search_result = search_face_from_face(face_img)
+                search_result = json.loads(search_result)
+                print(search_result)
+                if(search_result.get("status")):
+                    db_nim = search_result.get("data").get("nim")
+                    db_nama = search_result.get("data").get("nama")
+                    db_score = search_result.get("data").get("score")
+                    
+                    if db_nim == nim:
+                        return jsonify({"status": True, "pesan": f"Wajah cocok dengan nim  {nim}, dengan score {db_score}","data" : search_result.get("data")})
+                    else:
+                        return jsonify({"status": False, "pesan": f"Wajah tidak cocok dengan nim  {nim}, tapi memilki hasil yang mirip dengan nim {db_nim}, score {db_score}","data" : search_result.get("data")})
+                else:
+                    return jsonify({"status": False, "pesan": "Data wajah tidak ada yang cocok di database"})
+            else:
+                return jsonify({"status": False, "pesan": "Wajah tidak terdeteksi"})
+    except Exception as e:
+        print(e)
+        return jsonify({"status": False, "pesan":"Error Exception"})
 def run_flask():
     app.run(host="0.0.0.0", port=5000)
 
 # Jalankan Flask di thread terpisah
-threading.Thread(target=run_flask, daemon=True).start()
+threading.Thread(target=run_flask, daemon=False).start()
+
+
+display_faces = []  # Menyimpan info wajah: (x1, y1, x2, y2, nama, score, timestamp)
+display_duration = 2  # detik
 
 while True:
-    
     if paused != last_paused_state:
         # Jika state berubah, tutup semua jendela sebelumnya
         cv2.destroyAllWindows()
@@ -173,9 +213,11 @@ while True:
                     _, buffer = cv2.imencode('.jpg', face_img)
                     img_base64 = base64.b64encode(buffer).decode('utf-8')
 
-                    if(search_result.get("status")):                        
-                        #is_live = liveness_model.predict(face_img) nanti tambahkan deteksi muka orang atau gambar
-                        #label = "LIVE" if is_live > 0.8 else "PHOTO"
+                    if(search_result.get("status")):
+                        nama = search_result.get("data").get("nama")
+                        score = search_result.get("data").get("score")
+                        color = (0, 255, 0)
+
                         print(f"Ditemukan {search_result.get("data").get("nama")} dengan score {search_result.get("data").get("score")}")
                         
                         data_hadir = {
@@ -190,7 +232,7 @@ while True:
                         except Exception as e:
                             print(e)
                             show_toast("Gagal Post Kehadiran")
-
+                        
                         
                     else:
                         data_register = {
@@ -199,12 +241,26 @@ while True:
                         }
                         post_register = curl_post(data_register)
                         print(f"Post register {post_register}")
-                        
+                        nama = "Belum Terdaftar"
+                        score = 0
+                        color = (0, 0, 255)
+                display_faces.append((x1, y1, x2, y2, nama, score, time.time(),color))
             else:
                 cv2.putText(frame, f"Stabil dalam {int(remaining)+1}s",
                             (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1,
                             (0, 0, 255), 2)
+        
+        #Menampilkan Nama
+        if display_faces:  # hanya jalankan jika ada wajah yang perlu ditampilkan
+            current_time = time.time()
 
+            for (x1, y1, x2, y2, nama, score, t,color) in display_faces:
+                if current_time - t < display_duration:
+                    # Gambar kotak dan nama selama 2 detik
+                    cv2.putText(frame, f"{nama} ({score:.2f})", 
+                                (x1, y2 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                color, 2)
+        
         # Tambahkan info wajah terdeteksi
         cv2.putText(frame, f"Wajah stabil: {stable_count}",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
