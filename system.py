@@ -129,6 +129,38 @@ def upload_base64():
 def search_data():
     try:
         data = request.get_json()
+        base64_str = data.get("image")
+        if not base64_str:
+            return jsonify({"status": False, "pesan": "Gambar tidak boleh kosong"})
+        else:
+            img = base64_to_ndarray(base64_str)
+            predict = model.predict(source=img)
+            boxes = predict[0].boxes
+            if boxes and len(boxes.xyxy) > 0:
+                box = boxes[0]
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                face_img = img[y1:y2, x1:x2]
+                resized_face = cv2.resize(face_img, (224, 224))
+
+                search_result = search_face_from_face(face_img)
+                search_result = json.loads(search_result)
+                print(search_result)
+                if(search_result.get("status")):
+                    db_nim = search_result.get("data").get("nim")
+                    db_nama = search_result.get("data").get("nama")
+                    db_score = search_result.get("data").get("score")
+                    return jsonify({"status": True, "pesan": f"Wajah cocok dengan nim  {db_nim}, dengan score {db_score}","data" : search_result.get("data")})
+                else:
+                    return jsonify({"status": False, "pesan": "Data wajah tidak ada yang cocok di database"})
+            else:
+                return jsonify({"status": False, "pesan": "Wajah tidak terdeteksi"})
+    except Exception as e:
+        print(e)
+        return jsonify({"status": False, "pesan":"Error Exception"})
+@app.route('/search_data_with_nim', methods=['POST'])
+def search_data_with_nim():
+    try:
+        data = request.get_json()
         nim = data.get("nomor_identitas")
         base64_str = data.get("image")
         if not nim:
