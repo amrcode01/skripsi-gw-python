@@ -8,14 +8,21 @@ from ultralytics import YOLO
 from flask import Flask, request, jsonify, send_from_directory
 import threading
 import numpy as np
-
 import matplotlib.pyplot as plt
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--mode", type=str, default="normal", help="Mode running")
+args = parser.parse_args()
 
 
 model = YOLO('yolov11n-face.pt')
-cap = cv2.VideoCapture(0)
 
-run_yolo_realtime = True
+run_yolo_realtime = False
+if args.mode == "onlyAPI":
+    run_yolo_realtime = False
+else:
+    run_yolo_realtime = True
 prev_count = 0
 stable_count = 0
 countdown_start = None
@@ -158,14 +165,19 @@ def search_data():
 def run_flask():
     app.run(host="0.0.0.0", port=5000)
 
-# Jalankan Flask di thread terpisah
-threading.Thread(target=run_flask, daemon=False).start()
+if not run_yolo_realtime:
+    # Jalankan Flask di thread terpisah
+    threading.Thread(target=run_flask, daemon=False).start()
+else:
+    cap = cv2.VideoCapture(0)
 
 
 display_faces = []  # Menyimpan info wajah: (x1, y1, x2, y2, nama, score, timestamp)
 display_duration = 2  # detik
 
 while True:
+    if not run_yolo_realtime:
+        run_flask();
     if paused != last_paused_state:
         # Jika state berubah, tutup semua jendela sebelumnya
         cv2.destroyAllWindows()
