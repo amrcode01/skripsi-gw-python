@@ -100,14 +100,12 @@ def create_dataset_from_image(image, nim: str, nama: str):
 
 def search_face_from_face(filepath: str, threshold=0.75):
     start_time = time.time()  # Mulai hitung waktu
-
     embedding = encode_face(filepath)
-    
     if embedding is None:
         return json.dumps({
             "status": False,
             "pesan": "[ERROR] Wajah tidak terdeteksi dalam gambar.",
-            "waktu_proses": f"{(time.time() - start_time):.4f} detik"
+            "waktu_proses": f"{(time.time() - start_time):.2f} detik"
         })
 
     search_result = collection.search(
@@ -125,24 +123,24 @@ def search_face_from_face(filepath: str, threshold=0.75):
             if distance >= threshold:
                 return json.dumps({
                     "status": True,
-                    "pesan": f"{hit.entity.get('nama')} Score: {distance:.4f}",
+                    "pesan": f"{hit.entity.get('nama')} Score: {distance:.2f}",
                     "data": {
                         "nama": hit.entity.get('nama'),
                         "nim": hit.entity.get('nim'),
                         "score": hit.distance,
                     },
-                    "waktu_proses": f"{process_time:.4f} detik"
+                    "waktu_proses": f"{process_time:.2f} detik"
                 })
             else:
                 return json.dumps({
                     "status": False,
-                    "pesan": f"[NO MATCH] Score: {distance:.4f}",
-                    "waktu_proses": f"{process_time:.4f} detik"
+                    "pesan": f"[NO MATCH] Score: {distance:.2f}",
+                    "waktu_proses": f"{process_time:.2f} detik"
                 })
     return json.dumps({
         "status": False,
         "pesan": "[ERROR] Wajah tidak ditemukan.",
-        "waktu_proses": f"{(time.time() - start_time):.4f} detik"
+        "waktu_proses": f"{(time.time() - start_time):.2f} detik"
     })
 def delete_by_nim(nim_value: str):
     try:

@@ -15,20 +15,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--mode", type=str, default="normal", help="Mode running")
 args = parser.parse_args()
 
-def warmup_model():
-    dummy = np.zeros((640, 640, 3), dtype=np.uint8)
-    model.predict(dummy)
 
 model = YOLO('yolov11n-face.pt')
-
-threading.Thread(target=warmup_model).start()
 
 run_yolo_realtime = False
 if args.mode == "onlyAPI":
     run_yolo_realtime = False
 else:
     run_yolo_realtime = True
-    
 prev_count = 0
 stable_count = 0
 countdown_start = None
@@ -36,7 +30,6 @@ countdown_duration = 3  # detik
 paused = True
 last_paused_state = paused  # untuk mendeteksi perubahan state
 
-tampung_hasil = []
 app = Flask(__name__)
 
 @app.route('/')
@@ -81,10 +74,7 @@ def validate_image():
             return jsonify({"status" : False,"pesan": "Nomor identitas tidak boleh kosong"})
         else:
             img = base64_to_ndarray(base64_str)
-            start_time = time.time()
             predict = model.predict(source=img)
-            end_time = time.time()  # ⬅️ selesai prediksi
-            durasi = end_time - start_time
             boxes = predict[0].boxes
             if boxes and len(boxes.xyxy) > 0:
                 box = boxes[0]
@@ -98,14 +88,10 @@ def validate_image():
                 #plt.title("Crop Wajah")
                 #plt.show()
 
-                tampung_hasil.append({
-                    "nim": nim,
-                    "nama": nama,
-                    "waktu_yolo": round(durasi, 2)  # detik
-                })
+                
                 _, buffer = cv2.imencode('.jpg', resized_face)
                 img_base64 = base64.b64encode(buffer).decode('utf-8')
-                return jsonify({"status": True, "pesan":"Gambar terdeteksi dan valid","time" : round(durasi, 2),"data" : img_base64})
+                return jsonify({"status": True, "pesan":"Gambar terdeteksi dan valid","data" : img_base64})
             else:
                 return jsonify({"status": False, "pesan":"Gambar tidak terdeteksi"})
     except Exception as e:
@@ -148,9 +134,7 @@ def search_data():
             return jsonify({"status": False, "pesan": "Gambar tidak boleh kosong"})
         else:
             img = base64_to_ndarray(base64_str)
-            start_time = time.time()
             predict = model.predict(source=img)
-            process_time_yolo = time.time() - start_time
             boxes = predict[0].boxes
             if boxes and len(boxes.xyxy) > 0:
                 box = boxes[0]
@@ -160,48 +144,13 @@ def search_data():
 
                 search_result = search_face_from_face(face_img)
                 search_result = json.loads(search_result)
+                print(search_result)
                 if(search_result.get("status")):
                     db_nim = search_result.get("data").get("nim")
                     db_nama = search_result.get("data").get("nama")
                     db_score = search_result.get("data").get("score")
-                    waktu_proses = search_result.get("waktu_proses")
-                    print(search_result)
-                    #FOR DEBUG HASIL
-                    line1 = f"{db_nim} - {db_nama}"
-                    line2 = f"Score: {db_score:.2f}"
-                    line3 = f"Waktu Yolo: {process_time_yolo:.2f}"
-                    line4 = f"Waktu Facenet {waktu_proses}"
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-                    # tulis teks baris 1 tepat di bawah box
-                    cv2.putText(img, line1, (x1, y2 + 25),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-
-                    # tulis teks baris 2 di bawah baris 1
-                    cv2.putText(img, line2, (x1, y2 + 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                    cv2.putText(img, line3, (x1, y2 + 75),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                    cv2.putText(img, line4, (x1, y2 + 100),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                    cv2.imwrite("output.jpg", img)
-                    #BATAS DEBUG HASIL
-
-
-                    return jsonify({"status": False, "pesan": f"Wajah cocok dengan nim  {db_nim}, dengan score {db_score}","data" : search_result.get("data")})
+                    return jsonify({"status": True, "pesan": f"Wajah cocok dengan nim  {db_nim}, dengan score {db_score}","data" : search_result.get("data")})
                 else:
-
-                    #FOR DEBUG HASIL
-                    line2 = f"Waktu Yolo: {process_time_yolo:.2f}"
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)  # merah
-                    cv2.putText(img, "Belum Terdaftar", (x1, y2 + 25),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                    cv2.putText(img, line2, (x1, y2 + 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                    cv2.imwrite("output.jpg", img)
-
-                    #BATAS DEBUG HASIL
-
                     return jsonify({"status": False, "pesan": "Data wajah tidak ada yang cocok di database"})
             else:
                 return jsonify({"status": False, "pesan": "Wajah tidak terdeteksi"})
@@ -228,12 +177,11 @@ def search_data_with_nim():
 
                 search_result = search_face_from_face(face_img)
                 search_result = json.loads(search_result)
+                print(search_result)
                 if(search_result.get("status")):
                     db_nim = search_result.get("data").get("nim")
                     db_nama = search_result.get("data").get("nama")
                     db_score = search_result.get("data").get("score")
-                    waktu_proses = search_result.get("waktu_proses")
-
                     
                     if db_nim == nim:
                         return jsonify({"status": True, "pesan": f"Wajah cocok dengan nim  {nim}, dengan score {db_score}","data" : search_result.get("data")})
@@ -249,21 +197,19 @@ def search_data_with_nim():
 def run_flask():
     app.run(host="0.0.0.0", port=5000)
 
-if run_yolo_realtime:
+if not run_yolo_realtime:
     # Jalankan Flask di thread terpisah
     threading.Thread(target=run_flask, daemon=False).start()
+else:
     cap = cv2.VideoCapture(0)
 
-if not run_yolo_realtime: #Hanya api only
-    threading.Thread(target=run_flask, daemon=False).start()
-    threading.Event().wait() #biar tidak lansung mati
 
 display_faces = []  # Menyimpan info wajah: (x1, y1, x2, y2, nama, score, timestamp)
 display_duration = 2  # detik
 
 while True:
-
-    
+    if not run_yolo_realtime:
+        run_flask();
     if paused != last_paused_state:
         # Jika state berubah, tutup semua jendela sebelumnya
         cv2.destroyAllWindows()
@@ -385,10 +331,6 @@ while True:
         break
     elif key == ord('p'):
         paused = not paused
-    elif key == ord('s'):
-        print("Data yang ditampung")
-        print(tampung_hasil)
-        # lakukan aksi, misal simpan frame
 
 cap.release()
 cv2.destroyAllWindows()
